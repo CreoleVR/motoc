@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use nalgebra::{Rotation3, Vector3};
 
@@ -72,7 +73,7 @@ impl Calibrator for OffsetMethod {
         data: &mut crate::common::CalibratorData,
         status: &mut MultiProgress,
     ) -> anyhow::Result<StepResult> {
-        status.clear()?;
+        status.clear().context("Unable to clear status")?;
         let spinner = status.add(ProgressBar::new_spinner());
         spinner.set_style(ProgressStyle::default_spinner().tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"));
 
@@ -97,11 +98,13 @@ impl Calibrator for OffsetMethod {
     fn step(&mut self, data: &mut crate::common::CalibratorData) -> anyhow::Result<StepResult> {
         let (a_loc, a_vel) = data.devices[self.device_a]
             .space
-            .relate(&data.stage, data.now)?;
+            .relate(&data.stage, data.now)
+            .context("Unable to locate device A")?;
 
         let (b_loc, b_vel) = data.devices[self.device_b]
             .space
-            .relate(&data.stage, data.now)?;
+            .relate(&data.stage, data.now)
+            .context("Unable to locate device B")?;
 
         let [Ok(pose_a), Ok(pose_b)] = [a_loc.into_transformd(), b_loc.into_transformd()] else {
             if let Some(spinner) = self.spinner.as_mut() {
@@ -135,7 +138,9 @@ impl Calibrator for OffsetMethod {
 
         let delta_global = pose_a * target_a.inverse();
 
-        let to_b = data.get_device_origin(self.device_b)?;
+        let to_b = data
+            .get_device_origin(self.device_b)
+            .context("Unable to get device B origin")?;
         let root_b = TransformD::from(to_b.get_offset()?);
 
         let pos_offset = root_b.origin + delta_global.origin;
@@ -153,7 +158,8 @@ impl Calibrator for OffsetMethod {
                 Some(time) => {
                     if time.elapsed() > Duration::from_secs(5) {
                         log::info!("Tracking anomaly detected. Restarting from scratch.");
-                        to_b.set_offset(TransformD::default().into())?;
+                        to_b.set_offset(TransformD::default().into())
+                            .context("Unable to set tracking origin B offset")?;
                         self.anomaly_start = Some(Instant::now());
                     }
                 }
@@ -194,7 +200,8 @@ impl Calibrator for OffsetMethod {
             basis: Rotation3::default().slerp(&delta_global.basis, self.lerp_factor) * root_b.basis,
         };
 
-        to_b.set_offset(offset.into())?;
+        to_b.set_offset(offset.into())
+            .context("Unable to set tracking origin B offset")?;
 
         Ok(StepResult::Continue)
     }

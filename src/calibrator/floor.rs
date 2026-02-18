@@ -1,5 +1,6 @@
 use std::{mem::MaybeUninit, ptr};
 
+use anyhow::Context;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use libmonado as mnd;
@@ -43,7 +44,7 @@ impl Calibrator for FloorMethod {
         _data: &mut crate::common::CalibratorData,
         status: &mut MultiProgress,
     ) -> anyhow::Result<StepResult> {
-        status.clear()?;
+        status.clear().context("Unable to clear status")?;
         let spinner = status.add(ProgressBar::new_spinner());
         spinner.set_style(ProgressStyle::default_spinner().tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"));
 
@@ -106,11 +107,13 @@ impl Calibrator for FloorMethod {
         if lowest_y < 0.0 {
             let mut stage = data
                 .monado
-                .get_reference_space_offset(mnd::ReferenceSpaceType::Stage)?;
+                .get_reference_space_offset(mnd::ReferenceSpaceType::Stage)
+                .context("Unable to get reference offset")?;
 
             stage.position.y += lowest_y;
             data.monado
-                .set_reference_space_offset(mnd::ReferenceSpaceType::Stage, stage)?;
+                .set_reference_space_offset(mnd::ReferenceSpaceType::Stage, stage)
+                .context("Unable to set reference offset")?;
         }
 
         Ok(StepResult::Continue)

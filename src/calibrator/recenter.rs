@@ -1,3 +1,4 @@
+use anyhow::Context;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use libmonado as mnd;
@@ -54,7 +55,7 @@ impl Calibrator for RecenterMethod {
         _data: &mut crate::common::CalibratorData,
         status: &mut MultiProgress,
     ) -> anyhow::Result<StepResult> {
-        status.clear()?;
+        status.clear().context("Unable to clear status")?;
         let spinner = status.add(ProgressBar::new_spinner());
         spinner.set_style(ProgressStyle::default_spinner().tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"));
 
@@ -67,7 +68,10 @@ impl Calibrator for RecenterMethod {
             xr::ReferenceSpaceType::LOCAL => (&data.local, mnd::ReferenceSpaceType::Local),
             _ => panic!("Unexpected reference space {:?}", self.space),
         };
-        let loc = data.view.locate(space, data.now)?;
+        let loc = data
+            .view
+            .locate(space, data.now)
+            .context("Unable to locate VIEW")?;
 
         let Ok(hmd) = loc.into_transformd() else {
             if let Some(spinner) = self.spinner.as_mut() {
@@ -102,7 +106,8 @@ impl Calibrator for RecenterMethod {
         );
 
         data.monado
-            .set_reference_space_offset(mnd_space, new_reference.into())?;
+            .set_reference_space_offset(mnd_space, new_reference.into())
+            .context("Unable to set reference space offset")?;
 
         Ok(StepResult::End)
     }

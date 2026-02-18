@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use indicatif::{MultiProgress, ProgressBar};
 use nalgebra::{Dyn, Matrix3, OMatrix, Rotation3, RowVector3, UnitQuaternion, Vector3, U1, U3};
 
@@ -98,17 +98,22 @@ impl SampledMethod {
     fn collect_samples(&mut self, data: &mut crate::common::CalibratorData) -> anyhow::Result<()> {
         let new_a = data.devices[self.src_dev]
             .space
-            .locate(&data.stage, data.now)?
-            .into_transformd()?;
+            .locate(&data.stage, data.now)
+            .context("Unable to locate SRC_DEV in STAGE")?
+            .into_transformd()
+            .context("SRC_DEV pose does not translate to TransformD")?;
 
         let new_b = data.devices[self.dst_dev]
             .space
-            .locate(&data.stage, data.now)?
-            .into_transformd()?;
+            .locate(&data.stage, data.now)
+            .context("Unable to locate DST_DEV in STAGE")?
+            .into_transformd()
+            .context("DST_DEV pose does not translate to TransformD")?;
 
         let stage = TransformD::from(
             data.monado
-                .get_reference_space_offset(mnd::ReferenceSpaceType::Stage)?,
+                .get_reference_space_offset(mnd::ReferenceSpaceType::Stage)
+                .context("Unable to get STAGE reference")?,
         );
 
         let (new_a, new_b) = (stage * new_a, stage * new_b);
@@ -252,7 +257,7 @@ impl Calibrator for SampledMethod {
         _: &mut crate::common::CalibratorData,
         status: &mut MultiProgress,
     ) -> anyhow::Result<StepResult> {
-        status.clear()?;
+        status.clear().context("Unable to clear state")?;
         self.progress = Some(status.add(ProgressBar::new(self.num_samples as _)));
 
         log::info!("Move the two devices together!");
@@ -280,14 +285,20 @@ impl Calibrator for SampledMethod {
 
         // sampling done, calculate
         let rot = self.calibrate_rotation();
-        let pos = self.calibrate_translation(&rot)?;
+        let pos = self
+            .calibrate_translation(&rot)
+            .context("Unable to calibrate translation")?;
 
-        let dst_origin = data.get_device_origin(self.dst_dev)?;
+        let dst_origin = data
+            .get_device_origin(self.dst_dev)
+            .context("Unable to get DST_DEV origin")?;
 
         if pos.norm_squared() > 10000.0 {
             log::info!("Calibration failed, retrying...");
             self.samples.clear();
-            dst_origin.set_offset(TransformD::default().into())?;
+            dst_origin
+                .set_offset(TransformD::default().into())
+                .context("Unable to set DST origin offset")?;
             return Ok(StepResult::Continue);
         }
 
@@ -298,9 +309,15 @@ impl Calibrator for SampledMethod {
 
         log::info!("Calibration done. Offset: {}", offset);
 
-        let dst_root = TransformD::from(dst_origin.get_offset()?);
+        let dst_root = TransformD::from(
+            dst_origin
+                .get_offset()
+                .context("Unable to get DST origin offset")?,
+        );
         let full_offset = offset * dst_root;
-        dst_origin.set_offset(full_offset.into())?;
+        dst_origin
+            .set_offset(full_offset.into())
+            .context("Unable to set DST origin offset")?;
 
         if self.maintain {
             let offset = self.avg_b_to_a_offset(&offset);
@@ -325,8 +342,14 @@ impl Calibrator for SampledMethod {
                 0.02,
             ))))
         } else {
-            let src_origin = data.get_device_origin(self.src_dev)?;
-            let src_root = TransformD::from(src_origin.get_offset()?);
+            let src_origin = data
+                .get_device_origin(self.src_dev)
+                .context("Unable to get SRC_DEV origin")?;
+            let src_root = TransformD::from(
+                src_origin
+                    .get_offset()
+                    .context("Unable to get SRC origin offset")?,
+            );
             match data.save_calibration(
                 &self.profile,
                 src_origin.id as _,

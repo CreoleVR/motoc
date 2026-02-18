@@ -1,7 +1,8 @@
 use std::f32::consts::PI;
 
+use anyhow::Context;
 use colored::{Color, Colorize};
-use libmonado as mnd;
+use libmonado::{self as mnd, DeviceLogic};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use openxr::{SpaceLocationFlags, SpaceVelocityFlags};
 
@@ -42,7 +43,8 @@ impl Calibrator for Monitor {
         print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
         let stage = data
             .monado
-            .get_reference_space_offset(mnd::ReferenceSpaceType::Stage)?;
+            .get_reference_space_offset(mnd::ReferenceSpaceType::Stage)
+            .context("Unable to get STAGE offset")?;
         let (roll, pitch, yaw) =
             UnitQuaternion::from_quaternion(Quaternion::from(stage.orientation)).euler_angles();
         println!("{}", "[STAGE] Reference".bright_blue());
@@ -56,7 +58,8 @@ impl Calibrator for Monitor {
         println!("\n{}", "[LOCAL] Reference".bright_blue());
         let local = data
             .monado
-            .get_reference_space_offset(mnd::ReferenceSpaceType::Local)?;
+            .get_reference_space_offset(mnd::ReferenceSpaceType::Local)
+            .context("Unable to get LOCAL offset")?;
         let (roll, pitch, yaw) =
             UnitQuaternion::from_quaternion(Quaternion::from(local.orientation)).euler_angles();
         let pos = format!(
@@ -68,7 +71,9 @@ impl Calibrator for Monitor {
 
         for to in data.tracking_origins.iter() {
             println!("\n{}", format!("[{}] {}", to.id, to.name).bright_blue());
-            let pose = to.get_offset()?;
+            let pose = to
+                .get_offset()
+                .context("Unable to get tracking origin offset")?;
             let (roll, pitch, yaw) =
                 UnitQuaternion::from_quaternion(Quaternion::from(pose.orientation)).euler_angles();
             let pos = format!(
@@ -128,7 +133,10 @@ impl Calibrator for Monitor {
 
                 println!();
 
-                let (loc, vel) = d.space.relate(&data.stage, data.now)?;
+                let (loc, vel) = d
+                    .space
+                    .relate(&data.stage, data.now)
+                    .context("Unable to locate stage space")?;
 
                 let pos = format!(
                     "X: {:.2}, Y: {:.2}, Z: {:.2}",

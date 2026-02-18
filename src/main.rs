@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::Context;
 use calibrator::{
     Calibrator, FloorMethod, Monitor, OffsetMethod, RecenterMethod, SampledMethod, StepResult,
 };
@@ -14,7 +15,7 @@ use clap::Parser;
 use common::{vec3, CalibratorData, Device, OffsetType, UNIT};
 use env_logger::Env;
 use indicatif::MultiProgress;
-use libmonado as mnd;
+use libmonado::{self as mnd, DeviceLogic};
 use nalgebra::{Quaternion, Rotation3, UnitQuaternion};
 use openxr as xr;
 use transformd::TransformD;
@@ -118,7 +119,11 @@ fn handle_non_xr_subcommands(args: &Args, monado: &mnd::Monado) -> anyhow::Resul
     match args.command {
         Subcommands::NumDevices => {
             let mut count = 0;
-            for d in monado.devices()?.into_iter() {
+            for d in monado
+                .devices()
+                .context("Could not enumerate devices")?
+                .into_iter()
+            {
                 if !d.get_info_bool(mnd::MndProperty::PropertySupportsPositionBool)? {
                     continue;
                 }
@@ -131,7 +136,11 @@ fn handle_non_xr_subcommands(args: &Args, monado: &mnd::Monado) -> anyhow::Resul
             let mut devs = vec![];
             let mut dev_tos = vec![];
 
-            for d in monado.devices()?.into_iter() {
+            for d in monado
+                .devices()
+                .context("Could not enumerate devices")?
+                .into_iter()
+            {
                 if !d.get_info_bool(mnd::MndProperty::PropertySupportsPositionBool)? {
                     continue;
                 }
@@ -139,7 +148,11 @@ fn handle_non_xr_subcommands(args: &Args, monado: &mnd::Monado) -> anyhow::Resul
                 devs.push(d);
             }
 
-            for to in monado.tracking_origins()?.into_iter() {
+            for to in monado
+                .tracking_origins()
+                .context("Could not enumerate tracking origins")?
+                .into_iter()
+            {
                 println!("[{}] {}", to.id, to.name);
                 let pose = to.get_offset()?;
                 let (roll, pitch, yaw) =
@@ -192,7 +205,11 @@ fn handle_non_xr_subcommands(args: &Args, monado: &mnd::Monado) -> anyhow::Resul
                         println!("ID must be a tracking origin ID or 'STAGE' or 'LOCAL'!");
                         return Ok(true);
                     };
-                    for to in monado.tracking_origins()?.into_iter() {
+                    for to in monado
+                        .tracking_origins()
+                        .context("Could not enumerate tracking origins")?
+                        .into_iter()
+                    {
                         if to.id != id {
                             continue;
                         }
@@ -225,7 +242,10 @@ fn handle_non_xr_subcommands(args: &Args, monado: &mnd::Monado) -> anyhow::Resul
 
             if let Some(ref_space_type) = ref_space_type {
                 let mut offset = if relative {
-                    monado.get_reference_space_offset(ref_space_type)?.into()
+                    monado
+                        .get_reference_space_offset(ref_space_type)
+                        .context("Could not get reference space offset")?
+                        .into()
                 } else {
                     TransformD::default()
                 };
