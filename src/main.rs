@@ -18,13 +18,13 @@ use indicatif::MultiProgress;
 use libmonado::{self as mnd, DeviceLogic};
 use nalgebra::{Quaternion, Rotation3, UnitQuaternion};
 use openxr as xr;
+use openxr_mndx_xdev_space::SessionXDevExtensionMNDX;
 use transformd::TransformD;
 
 mod calibrator;
 mod common;
 mod helpers_xr;
 mod logbridge;
-mod mndx;
 mod transformd;
 
 #[cfg(test)]
@@ -302,8 +302,6 @@ fn xr_loop(args: Args, monado: mnd::Monado, mut status: MultiProgress) -> anyhow
 
     session.attach_action_sets(&[&actions])?;
 
-    let mndx = mndx::Mndx::new(&instance)?;
-
     log::info!("LibMonado API version {}", monado.get_api_version());
 
     let mut events = xr::EventDataBuffer::new();
@@ -326,7 +324,7 @@ fn xr_loop(args: Args, monado: mnd::Monado, mut status: MultiProgress) -> anyhow
                             continue 'event_loop;
                         }
 
-                        let mut data = load_calibrator_data(&session, &mndx, &monado)?;
+                        let mut data = load_calibrator_data(&session, &monado)?;
 
                         match args.command {
                             Subcommands::Monitor => {
@@ -560,7 +558,6 @@ fn xr_loop(args: Args, monado: mnd::Monado, mut status: MultiProgress) -> anyhow
 
 fn load_calibrator_data<'a, G>(
     session: &xr::Session<G>,
-    mndx: &mndx::Mndx,
     monado: &'a mnd::Monado,
 ) -> anyhow::Result<CalibratorData<'a>> {
     let mut devices = vec![];
@@ -568,14 +565,14 @@ fn load_calibrator_data<'a, G>(
 
     let mut serial_space = HashMap::new();
 
-    let xdev_list = mndx.create_list(session)?;
+    let xdev_list = session.get_xdev_list()?;
     for xdev in xdev_list.enumerate_xdevs()?.into_iter() {
         if !xdev.can_create_space() {
             continue;
         }
         serial_space.insert(
             xdev.serial().to_string(),
-            xdev.create_space(session.clone())?,
+            xdev.create_space(xr::Posef::IDENTITY)?,
         );
     }
 

@@ -577,6 +577,7 @@ dependencies = [
  "mint",
  "nalgebra",
  "openxr",
+ "openxr_mndx_xdev_space",
  "serde",
  "serde_json",
  "xdg 3.0.0",
@@ -750,6 +751,15 @@ checksum = "4b8d66081de28c2fa40216182a37292fe38aeea20bc184612504d5e64daf5359"
 dependencies = [
  "libc",
  "mint",
+]
+
+[[package]]
+name = "openxr_mndx_xdev_space"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1b0e85e7ff61dcce98c9e1981f9181bc935242cb3239bd6ec6cad83aa0c2897"
+dependencies = [
+ "openxr",
 ]
 
 [[package]]

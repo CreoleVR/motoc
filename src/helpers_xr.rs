@@ -1,7 +1,10 @@
+use std::{ffi::CString, str::FromStr};
+
 use nalgebra::Vector3;
 use openxr::{self as xr};
+use openxr_mndx_xdev_space::XR_MNDX_XDEV_SPACE_EXTENSION_NAME;
 
-use crate::{mndx, transformd::TransformD};
+use crate::transformd::TransformD;
 
 pub(crate) fn xr_init() -> anyhow::Result<(xr::Instance, xr::SystemId)> {
     let entry = xr::Entry::linked();
@@ -15,7 +18,7 @@ pub(crate) fn xr_init() -> anyhow::Result<(xr::Instance, xr::SystemId)> {
         "Missing MND_headless extension."
     );
 
-    let xdev_ext_name = mndx::XDEV_SPACE_EXTENSION_NAME.into();
+    let xdev_ext_name = CString::from_str(XR_MNDX_XDEV_SPACE_EXTENSION_NAME)?.into_bytes_with_nul();
 
     anyhow::ensure!(
         available_extensions.other.contains(&xdev_ext_name),
