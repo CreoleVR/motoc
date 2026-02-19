@@ -153,16 +153,22 @@ fn handle_non_xr_subcommands(args: &Args, monado: &mnd::Monado) -> anyhow::Resul
                 .context("Could not enumerate tracking origins")?
                 .into_iter()
             {
-                println!("[{}] {}", to.id, to.name);
-                let pose = to.get_offset()?;
-                let (roll, pitch, yaw) =
-                    UnitQuaternion::from_quaternion(Quaternion::from(pose.orientation))
-                        .euler_angles();
-                println!(
-                    " │ POS: (X: {:.2}, Y: {:.2}, Z: {:.2})",
-                    pose.position.x, pose.position.y, pose.position.z
-                );
-                println!(" │ ROT: (Y: {:.2}, P: {:.2}, R: {:.2})", yaw, pitch, roll);
+                let display_name = if to.name.is_empty() {
+                    "(Unknown Tracking Origin)"
+                } else {
+                    &to.name
+                };
+                println!("[{}] {}", to.id, display_name);
+                if let Ok(pose) = to.get_offset() {
+                    let (roll, pitch, yaw) =
+                        UnitQuaternion::from_quaternion(Quaternion::from(pose.orientation))
+                            .euler_angles();
+                    println!(
+                        " │ POS: (X: {:.2}, Y: {:.2}, Z: {:.2})",
+                        pose.position.x, pose.position.y, pose.position.z
+                    );
+                    println!(" │ ROT: (Y: {:.2}, P: {:.2}, R: {:.2})", yaw, pitch, roll);
+                }
 
                 let to_devs = devs
                     .iter()

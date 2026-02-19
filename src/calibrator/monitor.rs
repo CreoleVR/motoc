@@ -70,18 +70,28 @@ impl Calibrator for Monitor {
         println!("       {pos} {space} Yaw: {yaw:.2}, Pitch: {pitch:.2}, Roll: {roll:.2}");
 
         for to in data.tracking_origins.iter() {
-            println!("\n{}", format!("[{}] {}", to.id, to.name).bright_blue());
-            let pose = to
-                .get_offset()
-                .context("Unable to get tracking origin offset")?;
-            let (roll, pitch, yaw) =
-                UnitQuaternion::from_quaternion(Quaternion::from(pose.orientation)).euler_angles();
-            let pos = format!(
-                "X: {:.2}, Y: {:.2}, Z: {:.2}",
-                pose.position.x, pose.position.y, pose.position.z
+            let display_name = if to.name.is_empty() {
+                "(Unknown Tracking Origin)"
+            } else {
+                &to.name
+            };
+
+            println!(
+                "\n{}",
+                format!("[{}] {}", to.id, display_name).bright_blue()
             );
-            let space = " ".repeat(30 - pos.len().min(35));
-            println!(" │     {pos} {space} Yaw: {yaw:.2}, Pitch: {pitch:.2}, Roll: {roll:.2}");
+
+            if let Ok(pose) = to.get_offset() {
+                let (roll, pitch, yaw) =
+                    UnitQuaternion::from_quaternion(Quaternion::from(pose.orientation))
+                        .euler_angles();
+                let pos = format!(
+                    "X: {:.2}, Y: {:.2}, Z: {:.2}",
+                    pose.position.x, pose.position.y, pose.position.z
+                );
+                let space = " ".repeat(30 - pos.len().min(35));
+                println!(" │     {pos} {space} Yaw: {yaw:.2}, Pitch: {pitch:.2}, Roll: {roll:.2}");
+            }
 
             let to_devs = data
                 .devices
