@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context};
 use indicatif::{MultiProgress, ProgressBar};
-use nalgebra::{Dyn, Matrix3, OMatrix, Rotation3, RowVector3, UnitQuaternion, Vector3, U1, U3};
+use nalgebra::{
+    Dyn, Matrix3, Matrix4, OMatrix, Rotation3, RowVector2, RowVector3, UnitQuaternion, Vector3,
+    Vector4, U1, U2, U3,
+};
 
 use libmonado as mnd;
 
@@ -12,6 +15,8 @@ use crate::{
 };
 
 use super::Calibrator;
+
+const AXIS_VARIANCE_THRESHOLD: f64 = 0.001;
 
 struct DeltaRotSample {
     a: RowVector3<f64>,
@@ -62,10 +67,6 @@ struct Sample {
     b: TransformD,
 }
 
-/// finds the offset by sampling two devices moving together over time
-///
-/// implements the math from OpenVR-SpaceCalibrator by pushrax
-/// https://github.com/pushrax/OpenVR-SpaceCalibrator/blob/master/math.pdf
 pub struct SampledMethod {
     src_dev: usize,
     dst_dev: usize,
@@ -139,43 +140,89 @@ impl SampledMethod {
             deltas.len()
         );
 
-        let mut a_centroid = RowVector3::zeros();
-        let mut b_centroid = RowVector3::zeros();
-
-        for d in deltas.iter() {
-            a_centroid += d.a;
-            b_centroid += d.b;
+        if deltas.is_empty() {
+            return Rotation3::identity();
         }
 
-        let len_recip = 1.0 / deltas.len() as f64;
+        let n = deltas.len();
+        let mut a_points = OMatrix::<f64, Dyn, U2>::zeros(n);
+        let mut b_points = OMatrix::<f64, Dyn, U2>::zeros(n);
+        let mut a_centroid = RowVector2::zeros();
+        let mut b_centroid = RowVector2::zeros();
+
+        for (i, d) in deltas.iter().enumerate() {
+            let a = RowVector2::new(d.a[0], d.a[2]);
+            let b = RowVector2::new(d.b[0], d.b[2]);
+            a_points.set_row(i, &a);
+            b_points.set_row(i, &b);
+            a_centroid += a;
+            b_centroid += b;
+        }
+
+        let len_recip = 1.0 / n as f64;
         a_centroid *= len_recip;
         b_centroid *= len_recip;
 
-        let mut a_points = OMatrix::<f64, Dyn, U3>::zeros(deltas.len());
-        let mut b_points = OMatrix::<f64, Dyn, U3>::zeros(deltas.len());
-
-        for (i, d) in deltas.iter().enumerate() {
-            a_points.set_row(i, &(d.a - a_centroid));
-            b_points.set_row(i, &(d.b - b_centroid));
+        for i in 0..n {
+            let a = RowVector2::new(a_points[(i, 0)] - a_centroid[0], a_points[(i, 1)] - a_centroid[1]);
+            let b = RowVector2::new(b_points[(i, 0)] - b_centroid[0], b_points[(i, 1)] - b_centroid[1]);
+            a_points.set_row(i, &a);
+            b_points.set_row(i, &b);
         }
 
         let cross_cv = a_points.transpose() * b_points;
 
         let svd = cross_cv.svd(true, true);
-
         let u = svd.u.unwrap();
         let v = svd.v_t.unwrap().transpose();
 
-        let mut i = Matrix3::identity();
+        let rot = v * u.transpose();
+        let yaw = rot[(1, 0)].atan2(rot[(0, 0)]);
 
-        if (u * v.transpose()).determinant() < 0.0 {
-            i.row_mut(2)[2] = -1.0;
+        Rotation3::from_euler_angles(0.0, yaw, 0.0)
+    }
+
+    fn ref_to_target_offset(&self, offset: &TransformD) -> Vector3<f64> {
+        let mut accum = Vector3::zeros();
+        for s in self.samples.iter() {
+            let updated = *offset * s.b;
+            let origin_in_ref = updated.origin - s.a.origin;
+            accum += s.a.basis.transpose() * origin_in_ref;
         }
+        accum.scale(1.0 / self.samples.len() as f64)
+    }
 
-        let rot = v * i * u.transpose();
-        let rot = rot.transpose();
+    fn retargeting_error_rms(&self, ref_to_target: &Vector3<f64>, offset: &TransformD) -> f64 {
+        let mut accum = 0.0;
+        for s in self.samples.iter() {
+            let updated = *offset * s.b;
+            let expected = s.a.basis * ref_to_target + s.a.origin;
+            accum += (updated.origin - expected).norm_squared();
+        }
+        (accum / self.samples.len() as f64).sqrt()
+    }
 
-        Rotation3::from_matrix_unchecked(rot)
+    fn axis_variance(&self) -> f64 {
+        let mut points = Vec::with_capacity(self.samples.len());
+        let mut mean = Vector4::zeros();
+        for s in self.samples.iter() {
+            let q = UnitQuaternion::from_rotation_matrix(&s.b.basis);
+            let p = Vector4::new(q.w, q.i, q.j, q.k);
+            mean += p;
+            points.push(p);
+        }
+        mean.scale_mut(1.0 / points.len() as f64);
+
+        let mut cov = Matrix4::zeros();
+        for p in points.iter() {
+            let d = p - mean;
+            cov += d * d.transpose();
+        }
+        cov.scale_mut(1.0 / points.len() as f64);
+
+        let mut eig: Vec<f64> = cov.symmetric_eigen().eigenvalues.as_slice().to_vec();
+        eig.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        eig[1]
     }
 
     fn calibrate_translation(&self, rot: &Rotation3<f64>) -> anyhow::Result<Vector3<f64>> {
@@ -283,7 +330,6 @@ impl Calibrator for SampledMethod {
             progress.tick();
         }
 
-        // sampling done, calculate
         let rot = self.calibrate_rotation();
         let pos = self
             .calibrate_translation(&rot)
@@ -307,7 +353,24 @@ impl Calibrator for SampledMethod {
             origin: pos,
         };
 
-        log::info!("Calibration done. Offset: {}", offset);
+        let variance = self.axis_variance();
+        let ref_to_target = self.ref_to_target_offset(&offset);
+        let rms = self.retargeting_error_rms(&ref_to_target, &offset);
+
+        if variance < AXIS_VARIANCE_THRESHOLD {
+            log::warn!(
+                "Devices were rotated around too few axes (axis variance {:.4}); \
+                 calibration may be inaccurate. For best results re-run and rotate \
+                 the devices around at least two axes.",
+                variance
+            );
+        }
+
+        log::info!(
+            "Calibration done. Offset: {} (RMS {:.1} mm)",
+            offset,
+            rms * 1000.0
+        );
 
         let dst_root = TransformD::from(
             dst_origin
